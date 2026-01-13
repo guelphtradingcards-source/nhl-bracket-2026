@@ -104,5 +104,90 @@ def build_matchup_html(t1, t2, s1, s2):
     return f"""
     <div class="matchup">
         <div class="team">
-            <div class="name-wrap"><span class="seed">{s1}</span><img src="{t1['logo']}" width="20"> {t1['team'].upper()}<span class="rec">{rec(t1
+            <div class="name-wrap"><span class="seed">{s1}</span><img src="{t1['logo']}" width="20"> {t1['team'].upper()}<span class="rec">{rec(t1)}</span></div>
+            <div class="pts">{int(t1['pts'])}</div>
+        </div>
+        <div class="team">
+            <div class="name-wrap"><span class="seed">{s2}</span><img src="{t2['logo']}" width="20"> {t2['team'].upper()}<span class="rec">{rec(t2)}</span></div>
+            <div class="pts">{int(t2['pts'])}</div>
+        </div>
+    </div>
+    """
 
+# Prepare Brackets
+e_m1, e_m2, e_divs = get_bracket_seeds("Eastern")
+w_m1, w_m2, w_divs = get_bracket_seeds("Western")
+
+def get_conf_html(m1, m2, divs):
+    # Round 1 Divisional Pairings (2v3)
+    d1_name = m1[0]['div']
+    d1_2, d1_3 = divs[d1_name].iloc[1], divs[d1_name].iloc[2]
+    d2_name = m2[0]['div']
+    d2_2, d2_3 = divs[d2_name].iloc[1], divs[d2_name].iloc[2]
+    
+    return f"""
+    <div class="conf-bracket">
+        <div style="color:#444; font-size:10px; text-align:center; border-bottom:1px solid #333; margin-bottom:5px;">{d1_name.upper()}</div>
+        {build_matchup_html(m1[0], m1[1], m1[2], m1[3])}
+        {build_matchup_html(d1_2, d1_3, f"{d1_name[0]}2", f"{d1_name[0]}3")}
+        <div style="color:#444; font-size:10px; text-align:center; border-bottom:1px solid #333; margin-bottom:5px; margin-top:15px;">{d2_name.upper()}</div>
+        {build_matchup_html(m2[0], m2[1], m2[2], m2[3])}
+        {build_matchup_html(d2_2, d2_3, f"{d2_name[0]}2", f"{d2_name[0]}3")}
+    </div>
+    """
+
+# 7. RENDER FULL PAGE
+tree_html = f"""
+{bracket_css}
+<div class="bracket-tree">
+    {get_conf_html(e_m1, e_m2, e_divs)}
+    <div class="cup-zone">
+        <div style="font-size:60px;">🏆</div>
+        <div style="font-weight:900; letter-spacing:3px; margin-top:10px; color:#fff;">2026</div>
+        <div style="font-size:10px; color:#555;">STANLEY CUP FINAL</div>
+    </div>
+    {get_conf_html(w_m1, w_m2, w_divs)}
+</div>
+"""
+
+components.html(tree_html, height=750)
+
+# 8. RESTORED WILD CARD WATCH (FIXED)
+st.markdown("---")
+st.title("🏁 WILD CARD WATCH")
+wc_e, wc_w = st.columns(2)
+
+def draw_wc_cards(conf_name, col):
+    full_conf = df[df['conf'] == conf_name].sort_values('pts', ascending=False)
+    # Filter out top 3 in each division
+    auto_teams = []
+    for d in full_conf['div'].unique():
+        auto_teams.extend(full_conf[full_conf['div'] == d].sort_values('pts', ascending=False).head(3)['team'].tolist())
+    
+    wc_race = full_conf[~full_conf['team'].isin(auto_teams)].head(5)
+    cutoff = wc_race.iloc[1]['pts'] if len(wc_race) > 1 else 0
+    
+    with col:
+        st.write(f"**{conf_name} Bubble**")
+        for i, (idx, row) in enumerate(wc_race.iterrows()):
+            if i == 2: st.markdown("<div style='border-top:2px dashed #ef4444; margin:10px 0; text-align:center;'><span style='font-size:10px; color:#ef4444; font-weight:bold;'>CUTOFF</span></div>", unsafe_allow_html=True)
+            diff = int(row['pts'] - cutoff)
+            status = "✅ IN" if i < 2 else f"❌ {abs(diff)} OUT"
+            st.markdown(f"""
+            <div style="background:#111; padding:10px; border-radius:4px; border:1px solid #333; display:flex; justify-content:space-between; margin-bottom:5px;">
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <img src="{row['logo']}" width="20">
+                    <span style="font-weight:bold; font-size:14px;">{row['team'].upper()}</span>
+                </div>
+                <div style="display:flex; align-items:center; gap:15px;">
+                    <span style="color:#666; font-size:12px;">{int(row['w'])}-{int(row['gp']-row['w']-row['ot'])}-{int(row['ot'])}</span>
+                    <span style="font-size:12px; font-weight:bold;">{status}</span>
+                    <span style="background:#222; padding:2px 8px; border-radius:2px; font-weight:900;">{int(row['pts'])}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+draw_wc_cards("Eastern", wc_e)
+draw_wc_cards("Western", wc_w)
+
+st.markdown(f"<div style='text-align:center; color:#444; font-size:10px; margin-top:30px;'>DATA REFRESHED: {datetime.now().strftime('%H:%M:%S')} UTC</div>", unsafe_allow_html=True)

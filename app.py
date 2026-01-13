@@ -5,130 +5,134 @@ from PIL import Image
 import os
 
 # 1. PAGE SETUP
-st.set_page_config(page_title="NHL 2026 Bracketology", layout="wide")
+st.set_page_config(page_title="NHL Bracket 2026", layout="wide")
 
-# --- CUSTOM CSS FOR NHL FEEL ---
+# --- STYLING (The Pro Black/Silver Look) ---
 st.markdown("""
 <style>
     .matchup-card { background: #111; border: 1px solid #333; border-radius: 4px; padding: 10px; margin-bottom: 10px; }
     .team-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; }
-    .clinch-tag { font-size: 10px; font-weight: bold; padding: 2px 5px; border-radius: 3px; margin-left: 5px; }
-    .clinch-x { background: #15803d; color: white; } /* Clinched */
-    .bubble { background: #b91c1c; color: white; } /* Out */
-    .hero-text { text-align: center; padding: 20px; background: #000; border-bottom: 3px solid #D0D3D4; }
+    .pts { font-weight: 900; color: #fff; }
+    .wc-table { width: 100%; color: #eee; border-collapse: collapse; }
+    .wc-table th { border-bottom: 2px solid #444; text-align: left; padding: 10px; color: #888; font-size: 12px; }
+    .wc-table td { padding: 10px; border-bottom: 1px solid #222; }
+    .in-tag { color: #22c55e; font-weight: bold; }
+    .out-tag { color: #ef4444; font-weight: bold; }
 </style>
 """, unsafe_allow_html=True)
 
-# 2. BRANDING & HERO
+# 2. HERO SECTION
 if os.path.exists("header.img"):
     st.image(Image.open("header.img"), use_container_width=True)
 
-col_l, col_r = st.columns([1, 4])
-with col_l:
+col_logo, col_title = st.columns([1, 4])
+with col_logo:
     if os.path.exists("logo.img"):
-        st.image(Image.open("logo.img"), width=150)
-with col_r:
-    st.title("NHL BRACKET CHALLENGE 2026")
-    st.markdown("### *Predictive Standings & Magic Numbers*")
+        st.image(Image.open("logo.img"), width=120)
+    else:
+        st.markdown("<h1 style='text-align:center;'>🏆</h1>", unsafe_allow_html=True)
+with col_title:
+    st.title("2026 NHL PLAYOFF PREDICTOR")
 
-# 3. DATA ENGINE
+# 3. DATA & SESSION STATE
+if 'sim_games' not in st.session_state: st.session_state.sim_games = 0
+if 'f_wins' not in st.session_state: st.session_state.f_wins = 0
+
 @st.cache_data(ttl=3600)
-def get_nhl_data():
+def get_data():
     url = "https://api-web.nhle.com/v1/standings/now"
     data = requests.get(url).json()['standings']
     return pd.DataFrame([{
         'team': r['teamName']['default'], 'conf': r['conferenceName'], 
         'div': r['divisionName'], 'pts': r['points'], 'gp': r['gamesPlayed'],
-        'w': r['wins'], 'l': r['losses'], 'ot': r['otLosses'],
         'logo': r['teamLogo']} for r in data])
 
-df_base = get_nhl_data()
+df_base = get_data()
 
-# 4. SIMULATION DIALOG (The Modal)
-@st.dialog("Simulation Settings")
-def sim_modal():
-    st.session_state.target = st.selectbox("Focus Team", sorted(df_base['team'].tolist()))
-    st.session_state.sim_games = st.slider("Games to Simulate", 0, 82-int(df_base['gp'].mean()), 0)
-    st.session_state.f_wins = st.slider("Focus Team Wins", 0, st.session_state.sim_games, 0)
-    st.session_state.sos = st.select_slider("Schedule Difficulty (SoS)", options=["Easy", "Standard", "Hard"], value="Standard")
-    if st.button("Calculate Predictions"):
+# 4. BUG FIX: SLIDER MODAL
+@st.dialog("Prediction Engine")
+def open_sim():
+    st.write("Project the remainder of the season.")
+    target = st.selectbox("Focus Team", sorted(df_base['team'].tolist()))
+    
+    # Error prevention: check max games left
+    avg_rem = 82 - int(df_base['gp'].mean())
+    # Slider logic: Ensure max_value > 0
+    max_sim = max(1, avg_rem) 
+    
+    st.session_state.sim_games = st.slider("Games Remaining", 0, max_sim, st.session_state.sim_games)
+    
+    # Reset wins if they exceed new sim window
+    max_wins = max(1, st.session_state.sim_games)
+    st.session_state.f_wins = st.slider(f"{target} Wins", 0, max_wins, min(st.session_state.f_wins, max_wins))
+    
+    if st.button("Apply Scenarios"):
+        st.session_state.target_team = target
         st.rerun()
 
-# Init State
-if 'sim_games' not in st.session_state: st.session_state.sim_games = 0
+if st.button("⚙️ Open Simulation Settings", type="primary"):
+    open_sim()
 
-if st.button("⚙️ Open Predictor Sliders"):
-    sim_modal()
-
-# 5. FEATURE 2: SOS & ADVANCED PREDICTION
+# 5. PREDICTIVE LOGIC
 df = df_base.copy()
-# Adjust pace based on SoS: Easy (+5%), Hard (-5%)
-sos_map = {"Easy": 1.05, "Standard": 1.0, "Hard": 0.95}
-sos_adj = sos_map.get(st.session_state.get('sos', 'Standard'), 1.0)
+df['p_pct'] = df['pts'] / (df['gp'] * 2)
 
 for i, row in df.iterrows():
-    rem = 82 - row['gp']
-    sim_window = min(st.session_state.sim_games, rem)
-    
-    if row['team'] == st.session_state.get('target', ''):
-        df.at[i, 'pts'] += (st.session_state.get('f_wins', 0) * 2)
+    if row['team'] == st.session_state.get('target_team', ''):
+        df.at[i, 'pts'] += (st.session_state.f_wins * 2)
     else:
-        # Predictive record based on season pace * SoS
-        pace = (row['pts'] / (row['gp'] * 2)) * sos_adj
-        df.at[i, 'pts'] += round(pace * (sim_window * 2))
+        add = round(row['p_pct'] * (st.session_state.sim_games * 2))
+        df.at[i, 'pts'] += add
 
-# 6. FEATURE 4: MAGIC NUMBERS & CLINCHING
-# Simplified: If 100 pts, tagged as Clinched (x)
-def get_clinch_tag(pts):
-    if pts >= 100: return '<span class="clinch-tag clinch-x">X</span>'
-    return ''
-
-# 7. FEATURE 3: SEASON SERIES (MOCK)
-# In a real app, you'd fetch H2H; here we display the match structure
-def render_matchup(t1, t2, s1, s2):
+# 6. BRACKET RENDERING
+def draw_matchup(t1, t2):
     st.markdown(f"""
     <div class="matchup-card">
         <div class="team-row">
-            <span><img src="{t1['logo']}" width="20"> {t1['team']} {get_clinch_tag(t1['pts'])}</span>
+            <span><img src="{t1['logo']}" width="20"> {t1['team']}</span>
             <span class="pts">{int(t1['pts'])}</span>
         </div>
-        <div style="text-align:center; color:#555; font-size:9px;">H2H: 2-1-0</div>
+        <div style="text-align:center; font-size:10px; color:#444; margin:5px 0;">VS</div>
         <div class="team-row">
-            <span><img src="{t2['logo']}" width="20"> {t2['team']} {get_clinch_tag(t2['pts'])}</span>
+            <span><img src="{t2['logo']}" width="20"> {t2['team']}</span>
             <span class="pts">{int(t2['pts'])}</span>
         </div>
     </div>
     """, unsafe_allow_html=True)
 
-# 8. LAYOUT
-st.markdown("---")
 col_e, col_w = st.columns(2)
 
-def draw_bracket(conf, col):
-    sub = df[df['conf'] == conf].sort_values('pts', ascending=False).head(8).reset_index()
+def build_conf(name, col):
+    sub = df[df['conf'] == name].sort_values('pts', ascending=False).head(8).reset_index()
     with col:
-        st.subheader(f"{conf.upper()} CONFERENCE")
+        st.subheader(f"{name.upper()}")
         for i in range(4):
-            render_matchup(sub.iloc[i], sub.iloc[7-i], i+1, 8-i)
+            draw_matchup(sub.iloc[i], sub.iloc[7-i])
 
-draw_bracket("Eastern", col_e)
-draw_bracket("Western", col_w)
+build_conf("Eastern", col_e)
+build_conf("Western", col_w)
 
-# 9. FEATURE 1: WILD CARD WATCH
+# 7. BUG FIX: WILD CARD WATCH (HTML Rendering)
 st.markdown("---")
-st.subheader("🏁 FEATURE 1: WILD CARD WATCH")
-wc_e, wc_w = st.columns(2)
+st.title("🏁 WILD CARD WATCH")
+wc_e_col, wc_w_col = st.columns(2)
 
-def draw_wc(conf, col):
-    full_conf = df[df['conf'] == conf].sort_values('pts', ascending=False)
-    # The 8th spot is the target
-    target_pts = full_conf.iloc[7]['pts']
-    bubble = full_conf.iloc[6:11] # 7th through 11th
+def draw_wc_section(conf_name, col):
+    # Get everyone below the top 6 in conference (Simple WC logic)
+    full_conf = df[df['conf'] == conf_name].sort_values('pts', ascending=False)
+    cutoff = full_conf.iloc[7]['pts']
+    bubble = full_conf.iloc[6:12] # Teams around the cut line
+    
     with col:
-        for i, row in bubble.iterrows():
-            diff = int(row['pts'] - target_pts)
-            tag = f'<span class="clinch-tag bubble">{diff} OUT</span>' if diff < 0 else '<span class="clinch-tag clinch-x">IN</span>'
-            st.write(f"{row['team']}: {int(row['pts'])} PTS {tag}")
+        st.write(f"**{conf_name} Bubble**")
+        html = "<table class='wc-table'><tr><th>TEAM</th><th>PTS</th><th>GP</th><th>STATUS</th></tr>"
+        for _, row in bubble.iterrows():
+            diff = int(row['pts'] - cutoff)
+            status = "<span class='in-tag'>IN</span>" if diff >= 0 else f"<span class='out-tag'>{diff} OUT</span>"
+            html += f"<tr><td>{row['team']}</td><td>{int(row['pts'])}</td><td>{int(row['gp'])}</td><td>{status}</td></tr>"
+        html += "</table>"
+        # FIX: Use st.markdown with unsafe_allow_html
+        st.markdown(html, unsafe_allow_html=True)
 
-draw_wc("Eastern", wc_e)
-draw_wc_watch = draw_wc("Western", wc_w)
+draw_wc_section("Eastern", wc_e_col)
+draw_wc_section("Western", wc_w_col)

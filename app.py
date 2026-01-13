@@ -5,7 +5,7 @@ import requests
 # Page Config
 st.set_page_config(page_title="NHL 2026 Playoff Predictor", layout="wide")
 
-# --- CUSTOM CSS ---
+# --- CUSTOM CSS (Modern UI) ---
 st.markdown("""
 <style>
     .matchup-card { background: #1e293b; border-radius: 10px; padding: 15px; border-left: 5px solid #38bdf8; margin-bottom: 15px; }
@@ -18,6 +18,7 @@ st.markdown("""
 # --- DATA FETCHING ---
 @st.cache_data(ttl=3600)
 def get_data():
+    # Fetching real-time 2026 NHL data
     url = "https://api-web.nhle.com/v1/standings/now"
     resp = requests.get(url).json()
     return pd.DataFrame([{
@@ -30,13 +31,16 @@ df_base = get_data()
 
 # --- SIDEBAR CONTROLS ---
 st.sidebar.header("🏆 Predictor Settings")
-sim_games = st.sidebar.slider("Simulate Next X Games", 0, 30, 10)
+# FIX: Set the default value (the 3rd number) to 0
+sim_games = st.sidebar.slider("Simulate Next X Games", min_value=0, max_value=35, value=0)
 
 st.sidebar.markdown("---")
 st.sidebar.subheader("🎯 Focus Team")
 target = st.sidebar.selectbox("Select Team", sorted(df_base['team'].tolist()), index=df_base['team'].tolist().index("Toronto Maple Leafs"))
-f_wins = st.sidebar.slider(f"{target} Wins", 0, sim_games, int(sim_games*0.6))
-f_otl = st.sidebar.slider(f"{target} OT Losses", 0, sim_games - f_wins, 1)
+
+# FIX: Set default Wins/OTL to 0 so the bracket is clean on load
+f_wins = st.sidebar.slider(f"{target} Wins", 0, 35, 0)
+f_otl = st.sidebar.slider(f"{target} OT Losses", 0, 10, 0)
 
 # --- PREDICTIVE LOGIC ---
 df = df_base.copy()
@@ -44,32 +48,36 @@ df['pace'] = df['pts'] / (df['gp'] * 2)
 
 for i, row in df.iterrows():
     if row['team'] == target:
+        # Prevent simulating more wins than games
+        actual_sim = max(sim_games, f_wins + f_otl) 
         df.at[i, 'w'] += f_wins
         df.at[i, 'ot'] += f_otl
-        df.at[i, 'l'] += (sim_games - f_wins - f_otl)
+        df.at[i, 'l'] += max(0, sim_games - f_wins - f_otl)
         df.at[i, 'pts'] += (f_wins * 2) + f_otl
     else:
-        # Predict others based on current pace
+        # Predict others based on current season pace
         add_pts = round(row['pace'] * (sim_games * 2))
         df.at[i, 'pts'] += add_pts
         df.at[i, 'w'] += (add_pts // 2)
         df.at[i, 'ot'] += (add_pts % 2)
-        df.at[i, 'l'] += (sim_games - (add_pts // 2) - (add_pts % 2))
+        df.at[i, 'l'] += max(0, sim_games - (add_pts // 2) - (add_pts % 2))
 
 # --- RENDER BRACKET ---
 st.title("🏒 2026 NHL Predictive Playoff Bracket")
-st.caption(f"Projecting standings for {sim_games} games based on current season pace.")
+if sim_games == 0:
+    st.caption("Showing CURRENT NHL Playoff Bracket (as of Jan 13, 2026).")
+else:
+    st.caption(f"Projecting standings for {sim_games} games into the future.")
 
 col1, col2 = st.columns(2)
 
 def draw_conf(conf_name, column):
+    # Seeding Logic: 1v8, 2v7, 3v6, 4v5
     sub = df[df['conf'] == conf_name].sort_values('pts', ascending=False).head(8).reset_index()
     with column:
         st.subheader(conf_name)
         for i in range(4):
             t1, t2 = sub.iloc[i], sub.iloc[7-i]
-            
-            # Highlight Logic
             c1 = "focus-team" if t1['team'] == target else ""
             c2 = "focus-team" if t2['team'] == target else ""
             

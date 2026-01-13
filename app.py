@@ -129,5 +129,22 @@ col_e, col_w = st.columns(2)
 def draw_conference(name, col):
     m1, m2, divs = get_bracket_seeds(name)
     with col:
-        st.subheader(
+        st.subheader(f"{name.upper()} CONFERENCE")
+        
+        # Division 1 Bracket
+        st.markdown(f'<div class="div-header">{m1[0]["div"]} Division</div>', unsafe_allow_html=True)
+        render_matchup(m1[0], m1[1], m1[2], m1[3])
+        d1_2, d1_3 = divs[m1[0]['div']]
+        render_matchup(d1_2, d1_3, f"{m1[0]['div'][0]}2", f"{m1[0]['div'][0]}3")
+        
+        # Division 2 Bracket
+        st.markdown(f'<div class="div-header">{m2[0]["div"]} Division</div>', unsafe_allow_html=True)
+        render_matchup(m2[0], m2[1], m2[2], m2[3])
+        d2_2, d2_3 = divs[m2[0]['div']]
+        render_matchup(d2_2, d2_3, f"{m2[0]['div'][0]}2", f"{m2[0]['div'][0]}3")
+
+draw_conference("Eastern", col_e)
+draw_conference("Western", col_w)
+
+st.markdown(f'<div class="timestamp">LAST UPDATED: {datetime.now().strftime("%I:%M %p")} ET | LIVE 2026 STANDINGS</div>', unsafe_allow_html=True)
 
